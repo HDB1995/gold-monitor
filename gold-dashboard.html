@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>黄金实时行情监控系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * {
+            font-family: 'Inter', sans-serif;
+        }
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        body {
+            background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%);
+            min-height: 100vh;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        .gold-gradient {
+            background: linear-gradient(135deg, #FFD700 0%, #FFA500 50%, #FF8C00 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .up-gradient {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+        }
+        .down-gradient {
+            background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+        }
+        .pulse-gold {
+            animation: pulse-gold 2s infinite;
+        }
+        @keyframes pulse-gold {
+            0%, 100% { box-shadow: 0 0 20px rgba(255, 215, 0, 0.3); }
+            50% { box-shadow: 0 0 40px rgba(255, 215, 0, 0.6); }
+        }
+        .price-up {
+            animation: flash-green 0.5s ease;
+        }
+        .price-down {
+            animation: flash-red 0.5s ease;
+        }
+        @keyframes flash-green {
+            0% { background-color: rgba(16, 185, 129, 0.3); }
+            100% { background-color: transparent; }
+        }
+        @keyframes flash-red {
+            0% { background-color: rgba(239, 68, 68, 0.3); }
+            100% { background-color: transparent; }
+        }
+        .sparkline {
+            stroke-dasharray: 1000;
+            stroke-dashoffset: 1000;
+            animation: draw 2s ease forwards;
+        }
+        @keyframes draw {
+            to { stroke-dashoffset: 0; }
+        }
+        .ticker-item {
+            animation: ticker 20s linear infinite;
+        }
+        @keyframes ticker {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        .alert-badge {
+            animation: alert-pulse 1s infinite;
+        }
+        @keyframes alert-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .data-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+        .metric-card {
+            transition: all 0.3s ease;
+        }
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: blink 1s infinite;
+        }
+        .status-online {
+            background-color: #10B981;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body class="text-white overflow-x-hidden">
+    <!-- 顶部导航 -->
+    <nav class="glass-card sticky top-0 z-50 px-6 py-4">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center">
+                    <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 2l2.5 5h5L13 10.5 15 17 10 13.5 5 17l2-6.5L2.5 7h5L10 2z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold gold-gradient">黄金实时监控系统</h1>
+                    <p class="text-xs text-gray-400">Gold Real-time Monitoring System</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-6">
+                <div class="flex items-center gap-2 text-sm text-gray-400">
+                    <span class="status-dot status-online"></span>
+                    <span>实时连接</span>
+                </div>
+                <div class="text-right">
+                    <div id="current-time" class="text-lg font-semibold mono"></div>
+                    <div id="current-date" class="text-xs text-gray-400"></div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 滚动行情条 -->
+    <div class="bg-gradient-to-r from-yellow-900/30 via-orange-900/30 to-yellow-900/30 border-y border-yellow-500/20 overflow-hidden">
+        <div class="flex items-center py-2">
+            <div class="flex ticker-item whitespace-nowrap">
+                <span class="mx-8 flex items-center gap-2">
+                    <span class="text-yellow-400">AU9999</span>
+                    <span class="mono" id="ticker-au9999">782.45</span>
+                    <span class="text-green-400 text-sm">+1.23%</span>
+                </span>
+                <span class="mx-8 flex items-center gap-2">
+                    <span class="text-yellow-400">XAU/USD</span>
+                    <span class="mono" id="ticker-xau">2,416.80</span>
+                    <span class="text-green-400 text-sm">+0.85%</span>
+                </span>
+                <span class="mx-8 flex items-center gap-2">
+                    <span class="text-yellow-400">纽约黄金</span>
+                    <span class="mono" id="ticker-ny">2,425.30</span>
+                    <span class="text-red-400 text-sm">-0.12%</span>
+                </span>
+                <span class="mx-8 flex items-center gap-2">
+                    <span class="text-yellow-400">内外盘价差</span>
+                    <span class="mono" id="ticker-spread">-2.8</span>
+                    <span class="text-gray-400 text-sm">元/克</span>
+                </span>
+                <span class="mx-8 flex items-center gap-2">
+                    <span class="text-yellow-400">美元指数</span>
+                    <span class="mono" id="ticker-dxy">103.85</span>
+                    <span class="text-red-400 text-sm">-0.32%</span>
+                </span>
+                <span class="mx-8 flex items-center gap-2">
+                    <span class="text-yellow-400">人民币汇率</span>
+                    <span class="mono" id="ticker-usdcny">7.2456</span>
+                    <span class="text-green-400 text-sm">+0.05%</span>
+                </span>
+                <!-- 复制一份用于无缝滚动 -->
+                <span class="mx-8 flex items-center gap-2">
+                    <span class="text-yellow-400">AU9999</span>
+                    <span class="mono">782.45</span>
+                    <span class="text-green-400 text-sm">+1.23%</span>
+                </span>
+                <span class="mx-8 flex items-center gap-2">
+                    <span class="text-yellow-400">XAU/USD</span>
+                    <span class="mono">2,416.80</span>
+                    <span class="text-green-400 text-sm">+0.85%</span>
+                </span>
+                <span class="mx-8 flex items-center gap-2">
+                    <span class="text-yellow-400">纽约黄金</span>
+                    <span class="mono">2,425.30</span>
+                    <span class="text-red-400 text-sm">-0.12%</span>
+                </span>
+                <span class="mx-8 flex items-center gap-2">
+                    <span class="text-yellow-400">内外盘价差</span>
+                    <span class="mono">-2.8</span>
+                    <span class="text-gray-400 text-sm">元/克</span>
+                </span>
+                <span class="mx-8 flex items-center gap-2">
+                    <span class="text-yellow-400">美元指数</span>
+                    <span class="mono">103.85</span>
+                    <span class="text-red-400 text-sm">-0.32%</span>
+                </span>
+                <span class="mx-8 flex items-center gap-2">
+                    <span class="text-yellow-400">人民币汇率</span>
+                    <span class="mono">7.2456</span>
+                    <span class="text-green-400 text-sm">+0.05%</span>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主内容区 -->
+    <main class="max-w-7xl mx-auto p-6 space-y-6">
+        <!-- 主要价格卡片 -->
+        <div class="data-grid">
+            <!-- 上海黄金AU9999 -->
+            <div class="glass-card rounded-2xl p-6 metric-card pulse-gold" id="card-au9999">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-red-600 to-red-800 flex items-center justify-center">
+                            <span class="text-white font-bold text-sm">SGE</span>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-lg">上海黄金 AU9999</h3>
+                            <p class="text-xs text-gray-400">人民币/克</p>
+                        </div>
+                    </div>
+                    <span class="px-3 py-1 rounded-full bg-green-500/20 text-green-400 text-xs font-medium">交易中</span>
+                </div>
+                <div class="space-y-3">
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-4xl font-bold mono" id="price-au9999">782.45</span>
+                        <span class="text-lg text-gray-400">元/克</span>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <span class="flex items-center gap-1 text-green-400" id="change-au9999">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="mono font-semibold">+9.52</span>
+                        </span>
+                        <span class="px-2 py-1 rounded bg-green-500/20 text-green-400 text-sm mono" id="change-pct-au9999">+1.23%</span>
+                    </div>
+                </div>
+                <div class="mt-4 pt-4 border-t border-white/10 grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                        <p class="text-gray-400 text-xs">最高</p>
+                        <p class="mono font-medium" id="high-au9999">785.20</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-400 text-xs">最低</p>
+                        <p class="mono font-medium" id="low-au9999">773.80</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-400 text-xs">昨收</p>
+                        <p class="mono font-medium" id="prev-au9999">772.93</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 伦敦金 XAU/USD -->
+            <div class="glass-card rounded-2xl p-6 metric-card" id="card-xau">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center">
+                            <span class="text-white font-bold text-sm">LME</span>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-lg">伦敦金 XAU/USD</h3>
+                            <p class="text-xs text-gray-400">美元/盎司</p>
+                        </div>
+                    </div>
+                    <span class="px-3 py-1 rounded-full bg-green-500/20 text-green-400 text-xs font-medium">交易中</span>
+                </div>
+                <div class="space-y-3">
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-4xl font-bold mono" id="price-xau">2,416.80</span>
+                        <span class="text-lg text-gray-400">$/oz</span>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <span class="flex items-center gap-1 text-green-400" id="change-xau">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="mono font-semibold">+20.35</span>
+                        </span>
+                        <span class="px-2 py-1 rounded bg-green-500/20 text-green-400 text-sm mono" id="change-pct-xau">+0.85%</span>
+                    </div>
+                </div>
+                <div class="mt-4 pt-4 border-t border-white/10 grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                        <p class="text-gray-400 text-xs">最高</p>
+                        <p class="mono font-medium" id="high-xau">2,428.50</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-400 text-xs">最低</p>
+                        <p class="mono font-medium" id="low-xau">2,395.20</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-400 text-xs">昨收</p>
+                        <p class="mono font-medium" id="prev-xau">2,396.45</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 纽约黄金期货 -->
+            <div class="glass-card rounded-2xl p-6 metric-card" id="card-ny">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-green-600 to-green-800 flex items-center justify-center">
+                            <span class="text-white font-bold text-xs">COMEX</span>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-lg">纽约黄金期货</h3>
+                            <p class="text-xs text-gray-400">美元/盎司</p>
+                        </div>
+                    </div>
+                    <span class="px-3 py-1 rounded-full bg-red-500/20 text-red-400 text-xs font-medium">休市中</span>
+                </div>
+                <div class="space-y-3">
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-4xl font-bold mono" id="price-ny">2,425.30</span>
+                        <span class="text-lg text-gray-400">$/oz</span>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <span class="flex items-center gap-1 text-red-400" id="change-ny">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 012 0v7.586l2.293-2.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="mono font-semibold">-2.95</span>
+                        </span>
+                        <span class="px-2 py-1 rounded bg-red-500/20 text-red-400 text-sm mono" id="change-pct-ny">-0.12%</span>
+                    </div>
+                </div>
+                <div class="mt-4 pt-4 border-t border-white/10 grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                        <p class="text-gray-400 text-xs">最高</p>
+                        <p class="mono font-medium" id="high-ny">2,438.60</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-400 text-xs">最低</p>
+                        <p class="mono font-medium" id="low-ny">2,418.20</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-400 text-xs">昨收</p>
+                        <p class="mono font-medium" id="prev-ny">2,428.25</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 内外盘价差分析 -->
+        <div class="glass-card rounded-2xl p-6">
+            <div class="flex items-center justify-between mb-6">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-600 to-purple-800 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-lg">内外盘价差分析</h3>
+                        <p class="text-xs text-gray-400">Domestic vs International Price Spread</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="text-right">
+                        <p class="text-xs text-gray-400">当前价差</p>
+                        <p class="text-2xl font-bold mono" id="spread-value">-2.8</p>
+                    </div>
+                    <span class="px-3 py-1 rounded-full bg-yellow-500/20 text-yellow-400 text-xs">元/克</span>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-2">
+                    <div class="chart-container">
+                        <canvas id="spreadChart"></canvas>
+                    </div>
+                </div>
+                <div class="space-y-4">
+                    <div class="glass-card rounded-xl p-4">
+                        <p class="text-xs text-gray-400 mb-2">理论换算价</p>
+                        <div class="flex items-baseline gap-2">
+                            <span class="text-2xl font-bold mono" id="theoretical-price">785.25</span>
+                            <span class="text-sm text-gray-400">元/克</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">基于伦敦金×汇率÷31.1035</p>
+                    </div>
+                    <div class="glass-card rounded-xl p-4">
+                        <p class="text-xs text-gray-400 mb-2">价差率</p>
+                        <div class="flex items-baseline gap-2">
+                            <span class="text-2xl font-bold mono" id="spread-rate">-0.36%</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">(国内-理论)/理论</p>
+                    </div>
+                    <div class="glass-card rounded-xl p-4">
+                        <p class="text-xs text-gray-400 mb-2">套利建议</p>
+                        <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                            <span class="text-sm">价差正常，无套利机会</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- K线走势图 -->
+        <div class="glass-card rounded-2xl p-6">
+            <div class="flex items-center justify-between mb-6">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-600 to-orange-800 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-lg">K线走势图</h3>
+                        <p class="text-xs text-gray-400">Candlestick Chart Analysis</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button class="px-4 py-2 rounded-lg bg-yellow-500/20 text-yellow-400 text-sm font-medium hover:bg-yellow-500/30 transition" onclick="switchChart('au9999')">AU9999</button>
+                    <button class="px-4 py-2 rounded-lg bg-white/5 text-gray-400 text-sm font-medium hover:bg-white/10 transition" onclick="switchChart('xau')">XAU/USD</button>
+                    <button class="px-4 py-2 rounded-lg bg-white/5 text-gray-400 text-sm font-medium hover:bg-white/10 transition" onclick="switchChart('ny')">纽约期货</button>
+                </div>
+            </div>
+            <div class="chart-container" style="height: 400px;">
+                <canvas id="candleChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 预警设置和历史对比 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- 预警设置 -->
+            <div class="glass-card rounded-2xl p-6">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-red-600 to-red-800 flex items-center justify-center">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-lg">预警设置</h3>
+                            <p class="text-xs text-gray-400">Price Alert Settings</p>
+                        </div>
+                    </div>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="alert-toggle" class="sr-only" checked>
+                        <div class="w-12 h-6 rounded-full bg-green-500 relative transition-colors" id="alert-toggle-bg">
+                            <div class="w-5 h-5 rounded-full bg-white absolute top-0.5 right-0.5 transition-transform" id="alert-toggle-dot"></div>
+                        </div>
+                        <span class="text-sm text-gray-400">开启</span>
+                    </label>
+                </div>
+
+                <div class="space-y-4">
+                    <div class="glass-card rounded-xl p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-sm font-medium">AU9999 涨幅预警</span>
+                            <span class="alert-badge px-2 py-1 rounded bg-yellow-500/20 text-yellow-400 text-xs">已设置</span>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <input type="range" min="0" max="10" step="0.5" value="2" class="flex-1 h-2 bg-white/10 rounded-lg appearance-none cursor-pointer" id="alert-up">
+                            <span class="mono text-sm w-16 text-right" id="alert-up-value">2.0%</span>
+                        </div>
+                    </div>
+                    <div class="glass-card rounded-xl p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-sm font-medium">AU9999 跌幅预警</span>
+                            <span class="alert-badge px-2 py-1 rounded bg-yellow-500/20 text-yellow-400 text-xs">已设置</span>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <input type="range" min="0" max="10" step="0.5" value="2" class="flex-1 h-2 bg-white/10 rounded-lg appearance-none cursor-pointer" id="alert-down">
+                            <span class="mono text-sm w-16 text-right" id="alert-down-value">2.0%</span>
+                        </div>
+                    </div>
+                    <div class="glass-card rounded-xl p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-sm font-medium">价差异常预警</span>
+                            <span class="px-2 py-1 rounded bg-gray-500/20 text-gray-400 text-xs">未设置</span>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <input type="range" min="0" max="20" step="1" value="5" class="flex-1 h-2 bg-white/10 rounded-lg appearance-none cursor-pointer" id="alert-spread">
+                            <span class="mono text-sm w-16 text-right" id="alert-spread-value">5元</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4 p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
+                    <div class="flex items-start gap-3">
+                        <svg class="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+                        </svg>
+                        <div>
+                            <p class="text-sm text-yellow-400 font-medium">预警提示</p>
+                            <p class="text-xs text-gray-400 mt-1">当价格触及预警线时，系统将在页面显示提醒通知</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 历史数据对比 -->
+            <div class="glass-card rounded-2xl p-6">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-600 to-cyan-800 flex items-center justify-center">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-lg">历史数据对比</h3>
+                            <p class="text-xs text-gray-400">Historical Comparison</p>
+                        </div>
+                    </div>
+                    <select class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-yellow-500/50">
+                        <option>近7天</option>
+                        <option>近30天</option>
+                        <option>近90天</option>
+                        <option>今年</option>
+                    </select>
+                </div>
+
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between p-4 rounded-xl bg-white/5">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
+                                <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <p class="text-sm font-medium">7日涨幅</p>
+                                <p class="text-xs text-gray-400">近一周走势</p>
+                            </div>
+                        </div>
+                        <span class="text-xl font-bold mono text-green-400">+3.85%</span>
+                    </div>
+                    <div class="flex items-center justify-between p-4 rounded-xl bg-white/5">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
+                                <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <p class="text-sm font-medium">30日涨幅</p>
+                                <p class="text-xs text-gray-400">近一月走势</p>
+                            </div>
+                        </div>
+                        <span class="text-xl font-bold mono text-green-400">+8.62%</span>
+                    </div>
+                    <div class="flex items-center justify-between p-4 rounded-xl bg-white/5">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-lg bg-yellow-500/20 flex items-center justify-center">
+                                <svg class="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <p class="text-sm font-medium">年内最高</p>
+                                <p class="text-xs text-gray-400">2025年峰值</p>
+                            </div>
+                        </div>
+                        <span class="text-xl font-bold mono">788.50</span>
+                    </div>
+                    <div class="flex items-center justify-between p-4 rounded-xl bg-white/5">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center">
+                                <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <p class="text-sm font-medium">年内最低</p>
+                                <p class="text-xs text-gray-400">2025年谷底</p>
+                            </div>
+                        </div>
+                        <span class="text-xl font-bold mono">698.20</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 预警弹窗 -->
+    <div id="alert-modal" class="fixed top-20 right-6 z-50 hidden">
+        <div class="glass-card rounded-xl p-4 border-l-4 border-yellow-500 max-w-sm">
+            <div class="flex items-start gap-3">
+                <div class="w-10 h-10 rounded-full bg-yellow-500/20 flex items-center justify-center flex-shrink-0">
+                    <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                    </svg>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-yellow-400">价格预警</h4>
+                    <p class="text-sm text-gray-300 mt-1" id="alert-message">AU9999 涨幅超过 2.0%</p>
+                    <p class="text-xs text-gray-500 mt-2" id="alert-time">14:32:15</p>
+                </div>
+                <button onclick="closeAlert()" class="text-gray-400 hover:text-white">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 初始化数据
+        const goldData = {
+            au9999: {
+                price: 782.45,
+                change: 9.52,
+                changePct: 1.23,
+                high: 785.20,
+                low: 773.80,
+                prev: 772.93,
+                history: []
+            },
+            xau: {
+                price: 2416.80,
+                change: 20.35,
+                changePct: 0.85,
+                high: 2428.50,
+                low: 2395.20,
+                prev: 2396.45,
+                history: []
+            },
+            ny: {
+                price: 2425.30,
+                change: -2.95,
+                changePct: -0.12,
+                high: 2438.60,
+                low: 2418.20,
+                prev: 2428.25,
+                history: []
+            }
+        };
+
+        // 生成历史数据
+        function generateHistory(basePrice, days) {
+            const history = [];
+            let price = basePrice;
+            const now = new Date();
+            for (let i = days; i >= 0; i--) {
+                const date = new Date(now);
+                date.setDate(date.getDate() - i);
+                const volatility = 0.02;
+                const change = (Math.random() - 0.5) * volatility;
+                price = price * (1 + change);
+                history.push({
+                    date: date.toISOString().split('T')[0],
+                    open: price * (1 + (Math.random() - 0.5) * 0.01),
+                    high: price * (1 + Math.random() * 0.015),
+                    low: price * (1 - Math.random() * 0.015),
+                    close: price
+                });
+            }
+            return history;
+        }
+
+        // 初始化历史数据
+        goldData.au9999.history = generateHistory(750, 30);
+        goldData.xau.history = generateHistory(2300, 30);
+        goldData.ny.history = generateHistory(2310, 30);
+
+        // 更新时间
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('current-time').textContent = now.toLocaleTimeString('zh-CN', { hour12: false });
+            document.getElementById('current-date').textContent = now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+        }
+        setInterval(updateTime, 1000);
+        updateTime();
+
+        // 模拟实时数据更新
+        function simulatePriceUpdate() {
+            const symbols = ['au9999', 'xau', 'ny'];
+            symbols.forEach(symbol => {
+                const volatility = symbol === 'au9999' ? 0.3 : 1.5;
+                const change = (Math.random() - 0.5) * volatility;
+                const oldPrice = goldData[symbol].price;
+                goldData[symbol].price = Math.max(0.01, oldPrice + change);
+                goldData[symbol].change = goldData[symbol].price - goldData[symbol].prev;
+                goldData[symbol].changePct = (goldData[symbol].change / goldData[symbol].prev) * 100;
+                
+                // 更新高/低价
+                goldData[symbol].high = Math.max(goldData[symbol].high, goldData[symbol].price);
+                goldData[symbol].low = Math.min(goldData[symbol].low, goldData[symbol].price);
+                
+                updatePriceDisplay(symbol, oldPrice);
+            });
+            
+            // 更新价差
+            updateSpread();
+            
+            // 检查预警
+            checkAlerts();
+        }
+
+        // 更新价格显示
+        function updatePriceDisplay(symbol, oldPrice) {
+            const data = goldData[symbol];
+            const priceEl = document.getElementById(`price-${symbol}`);
+            const changeEl = document.getElementById(`change-${symbol}`);
+            const changePctEl = document.getElementById(`change-pct-${symbol}`);
+            const highEl = document.getElementById(`high-${symbol}`);
+            const lowEl = document.getElementById(`low-${symbol}`);
+            const card = document.getElementById(`card-${symbol}`);
+            
+            // 更新价格
+            priceEl.textContent = symbol === 'au9999' ? data.price.toFixed(2) : data.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            
+            // 更新涨跌
+            const isUp = data.change >= 0;
+            const colorClass = isUp ? 'text-green-400' : 'text-red-400';
+            const bgClass = isUp ? 'bg-green-500/20' : 'bg-red-500/20';
+            
+            changeEl.className = `flex items-center gap-1 ${colorClass}`;
+            changeEl.innerHTML = `
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="${isUp ? 'M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z' : 'M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 012 0v7.586l2.293-2.293a1 1 0 011.414 0z'}" clip-rule="evenodd"/>
+                </svg>
+                <span class="mono font-semibold">${data.change >= 0 ? '+' : ''}${data.change.toFixed(2)}</span>
+            `;
+            
+            changePctEl.className = `px-2 py-1 rounded ${bgClass} ${colorClass} text-sm mono`;
+            changePctEl.textContent = `${data.change >= 0 ? '+' : ''}${data.changePct.toFixed(2)}%`;
+            
+            // 更新高/低价
+            highEl.textContent = symbol === 'au9999' ? data.high.toFixed(2) : data.high.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            lowEl.textContent = symbol === 'au9999' ? data.low.toFixed(2) : data.low.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            
+            // 价格变动动画
+            if (data.price > oldPrice) {
+                card.classList.add('price-up');
+                setTimeout(() => card.classList.remove('price-up'), 500);
+            } else if (data.price < oldPrice) {
+                card.classList.add('price-down');
+                setTimeout(() => card.classList.remove('price-down'), 500);
+            }
+            
+            // 更新滚动条
+            const tickerEl = document.getElementById(`ticker-${symbol}`);
+            if (tickerEl) {
+                tickerEl.textContent = symbol === 'au9999' ? data.price.toFixed(2) : data.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+        }
+
+        // 更新价差
+        function updateSpread() {
+            const usdCny = 7.2456;
+            const theoreticalPrice = (goldData.xau.price * usdCny) / 31.1035;
+            const spread = goldData.au9999.price - theoreticalPrice;
+            
+            document.getElementById('spread-value').textContent = spread.toFixed(1);
+            document.getElementById('theoretical-price').textContent = theoreticalPrice.toFixed(2);
+            document.getElementById('spread-rate').textContent = (spread / theoreticalPrice * 100).toFixed(2) + '%';
+            document.getElementById('ticker-spread').textContent = spread.toFixed(1);
+        }
+
+        // 预警检查
+        function checkAlerts() {
+            const alertToggle = document.getElementById('alert-toggle');
+            if (!alertToggle.checked) return;
+            
+            const upThreshold = parseFloat(document.getElementById('alert-up').value);
+            const downThreshold = parseFloat(document.getElementById('alert-down').value);
+            
+            if (goldData.au9999.changePct >= upThreshold) {
+                showAlert(`AU9999 涨幅超过 ${upThreshold}%`, 'up');
+            } else if (goldData.au9999.changePct <= -downThreshold) {
+                showAlert(`AU9999 跌幅超过 ${downThreshold}%`, 'down');
+            }
+        }
+
+        // 显示预警
+        function showAlert(message, type) {
+            const modal = document.getElementById('alert-modal');
+            const messageEl = document.getElementById('alert-message');
+            const timeEl = document.getElementById('alert-time');
+            
+            messageEl.textContent = message;
+            timeEl.textContent = new Date().toLocaleTimeString('zh-CN');
+            modal.classList.remove('hidden');
+            
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 5000);
+        }
+
+        // 关闭预警
+        function closeAlert() {
+            document.getElementById('alert-modal').classList.add('hidden');
+        }
+
+        // 预警滑块事件
+        document.getElementById('alert-up').addEventListener('input', function() {
+            document.getElementById('alert-up-value').textContent = this.value + '%';
+        });
+        document.getElementById('alert-down').addEventListener('input', function() {
+            document.getElementById('alert-down-value').textContent = this.value + '%';
+        });
+        document.getElementById('alert-spread').addEventListener('input', function() {
+            document.getElementById('alert-spread-value').textContent = this.value + '元';
+        });
+
+        // 预警开关
+        document.getElementById('alert-toggle').addEventListener('change', function() {
+            const bg = document.getElementById('alert-toggle-bg');
+            const dot = document.getElementById('alert-toggle-dot');
+            if (this.checked) {
+                bg.classList.remove('bg-gray-600');
+                bg.classList.add('bg-green-500');
+                dot.style.transform = 'translateX(0)';
+            } else {
+                bg.classList.remove('bg-green-500');
+                bg.classList.add('bg-gray-600');
+                dot.style.transform = 'translateX(-24px)';
+            }
+        });
+
+        // 价差走势图
+        const spreadCtx = document.getElementById('spreadChart').getContext('2d');
+        const spreadChart = new Chart(spreadCtx, {
+            type: 'line',
+            data: {
+                labels: Array.from({length: 24}, (_, i) => `${i}:00`),
+                datasets: [{
+                    label: '内外盘价差',
+                    data: Array.from({length: 24}, () => (Math.random() - 0.5) * 10),
+                    borderColor: '#FFD700',
+                    backgroundColor: 'rgba(255, 215, 0, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#9CA3AF' }
+                    },
+                    y: {
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#9CA3AF' }
+                    }
+                }
+            }
+        });
+
+        // K线图
+        let currentChartSymbol = 'au9999';
+        const candleCtx = document.getElementById('candleChart').getContext('2d');
+        let candleChart;
+
+        function initCandleChart(symbol) {
+            const data = goldData[symbol].history.slice(-30);
+            const labels = data.map(d => d.date.slice(5));
+            
+            if (candleChart) {
+                candleChart.destroy();
+            }
+            
+            candleChart = new Chart(candleCtx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'K线',
+                        data: data.map(d => (d.high + d.low) / 2),
+                        backgroundColor: data.map((d, i) => {
+                            if (i === 0) return 'rgba(255, 215, 0, 0.5)';
+                            return d.close >= data[i-1].close ? 'rgba(16, 185, 129, 0.5)' : 'rgba(239, 68, 68, 0.5)';
+                        }),
+                        borderColor: data.map((d, i) => {
+                            if (i === 0) return '#FFD700';
+                            return d.close >= data[i-1].close ? '#10B981' : '#EF4444';
+                        }),
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const d = data[context.dataIndex];
+                                    return [`开盘: ${d.open.toFixed(2)}`, `最高: ${d.high.toFixed(2)}`, `最低: ${d.low.toFixed(2)}`, `收盘: ${d.close.toFixed(2)}`];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9CA3AF' }
+                        },
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9CA3AF' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function switchChart(symbol) {
+            currentChartSymbol = symbol;
+            initCandleChart(symbol);
+            
+            // 更新按钮样式
+            document.querySelectorAll('button[onclick^="switchChart"]').forEach(btn => {
+                btn.className = 'px-4 py-2 rounded-lg bg-white/5 text-gray-400 text-sm font-medium hover:bg-white/10 transition';
+            });
+            event.target.className = 'px-4 py-2 rounded-lg bg-yellow-500/20 text-yellow-400 text-sm font-medium hover:bg-yellow-500/30 transition';
+        }
+
+        // 初始化
+        initCandleChart('au9999');
+        updateSpread();
+        
+        // 每秒更新数据
+        setInterval(simulatePriceUpdate, 1000);
+        
+        // 更新价差图表
+        setInterval(() => {
+            spreadChart.data.datasets[0].data.shift();
+            spreadChart.data.datasets[0].data.push((Math.random() - 0.5) * 10);
+            spreadChart.update('none');
+        }, 5000);
+    </script>
+</body>
+</html>
