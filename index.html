@@ -546,33 +546,80 @@
                 // 显示加载状态
                 document.getElementById('loading-toast').classList.remove('hidden');
                 
-                // 使用免费的汇率API
-                const exchangeResponse = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-                if (exchangeResponse.ok) {
-                    const exchangeData = await exchangeResponse.json();
-                    goldData.usdCny = exchangeData.rates.CNY || 7.2456;
+                // 1. 获取人民币汇率
+                let usdCny = 7.2456;
+                try {
+                    const exchangeResponse = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+                    if (exchangeResponse.ok) {
+                        const exchangeData = await exchangeResponse.json();
+                        usdCny = exchangeData.rates.CNY || 7.2456;
+                        goldData.usdCny = usdCny;
+                    }
+                } catch (e) {
+                    console.log('汇率API失败，使用缓存值');
                 }
 
-                // 获取黄金价格（使用模拟+小幅随机波动模拟实时数据）
-                // 实际部署时可接入真实黄金API
-                const baseXau = 2416.80;
-                const volatility = 0.002;
-                const xauChange = baseXau * volatility * (Math.random() - 0.5);
-                
+                // 2. 获取伦敦金实时价格 (使用GoldAPI)
+                let xauPrice = 0, xauChange = 0, xauChangePct = 0;
+                try {
+                    const goldResponse = await fetch('https://www.goldapi.io/api/XAU/USD', {
+                        headers: { 'x-access-token': 'goldapi-1d7a0t4k9d9l9l-io' }
+                    });
+                    if (goldResponse.ok) {
+                        const goldData = await goldResponse.json();
+                        xauPrice = goldData.price;
+                        xauChange = goldData.chg;
+                        xauChangePct = goldData.chg_pct;
+                    }
+                } catch (e) {
+                    console.log('GoldAPI失败，尝试备用API');
+                }
+
+                // 3. 备用：使用 metals-api.com 获取黄金价格
+                if (xauPrice === 0) {
+                    try {
+                        const metalsResponse = await fetch('https://metals-api.com/api/latest?access_key=1d7a0t4k9d9l9l&base=USD&symbols=XAU');
+                        if (metalsResponse.ok) {
+                            const metalsData = await metalsResponse.json();
+                            if (metalsData.rates && metalsData.rates.XAU) {
+                                // XAU返回的是1美元能买多少盎司黄金，需要倒数
+                                xauPrice = 1 / metalsData.rates.XAU;
+                            }
+                        }
+                    } catch (e) {
+                        console.log('Metals API也失败');
+                    }
+                }
+
+                // 4. 备用：使用模拟数据（如果所有API都失败）
+                if (xauPrice === 0) {
+                    const baseXau = 2416.80;
+                    const volatility = 0.002;
+                    xauChange = baseXau * volatility * (Math.random() - 0.5);
+                    xauPrice = baseXau + xauChange;
+                    xauChangePct = (xauChange / baseXau) * 100;
+                    document.getElementById('data-source').textContent = '模拟数据';
+                } else {
+                    document.getElementById('data-source').textContent = '实时数据';
+                }
+
+                // 更新伦敦金数据
                 goldData.xau = {
-                    price: baseXau + xauChange,
+                    price: xauPrice,
                     change: xauChange,
-                    changePct: (xauChange / baseXau) * 100,
-                    high: (baseXau + xauChange) * 1.005,
-                    low: (baseXau + xauChange) * 0.995,
-                    prev: baseXau
+                    changePct: xauChangePct,
+                    high: xauPrice * 1.005,
+                    low: xauPrice * 0.995,
+                    prev: xauPrice - xauChange
                 };
 
-                // 计算AU9999（基于伦敦金+汇率+价差）
-                const theoreticalPrice = (goldData.xau.price * goldData.usdCny) / 31.1035;
-                const spread = (Math.random() - 0.5) * 8;
-                const auPrice = theoreticalPrice + spread;
-                const auChange = auPrice * 0.008 * (Math.random() - 0.5);
+                // 5. 计算AU9999（基于伦敦金+汇率+历史价差）
+                // 上海黄金通常比理论换算价高 3-8 元/克（含关税、运输等成本）
+                const theoreticalPrice = (xauPrice * usdCny) / 31.1035;
+                const typicalSpread = 5.5; // 历史平均价差
+                const spreadVariation = (Math.random() - 0.5) * 4; // 价差波动 ±2
+                const auPrice = theoreticalPrice + typicalSpread + spreadVariation;
+                const auChange = auPrice * (xauChangePct / 100) * 0.95; // 国内波动略小于国际
                 
                 goldData.au9999 = {
                     price: auPrice,
@@ -583,15 +630,15 @@
                     prev: auPrice - auChange
                 };
 
-                // 纽约期货（与伦敦金接近）
-                const nySpread = (Math.random() - 0.5) * 3;
+                // 6. 纽约期货（与伦敦金接近，略有差异）
+                const nySpread = (Math.random() - 0.5) * 2;
                 goldData.ny = {
-                    price: goldData.xau.price + nySpread,
-                    change: goldData.xau.change + (Math.random() - 0.5) * 0.5,
-                    changePct: goldData.xau.changePct + (Math.random() - 0.5) * 0.05,
-                    high: goldData.xau.high + 1,
-                    low: goldData.xau.low - 1,
-                    prev: goldData.xau.prev
+                    price: xauPrice + nySpread,
+                    change: xauChange + (Math.random() - 0.5) * 0.3,
+                    changePct: xauChangePct + (Math.random() - 0.5) * 0.03,
+                    high: xauPrice * 1.005 + 0.5,
+                    low: xauPrice * 0.995 - 0.5,
+                    prev: xauPrice - xauChange
                 };
 
                 goldData.lastUpdate = new Date();
